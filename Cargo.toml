@@ -2,6 +2,8 @@
 name = "iguard"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Graphical Polkit authentication agent for Linux desktop sessions"
 
 [dependencies]
 iced = { version = "0.14", features = ["tokio"] }
