@@ -26,7 +26,7 @@ fn password_id() -> Id {
 pub struct App {
     window: Option<window::Id>,
     dialog: Option<Dialog>,
-    responses: agent::ResponderSlot,
+    responses: agent::ResponderMap,
     config: Config,
     shared_config: Arc<RwLock<Config>>,
     config_path: PathBuf,
@@ -70,7 +70,7 @@ pub enum Message {
 
 pub fn boot() -> (App, Task<Message>) {
     let (ui_tx, ui_rx) = mpsc::unbounded_channel();
-    let responses = agent::ResponderSlot::default();
+    let responses = agent::ResponderMap::default();
     let (config, config_modified) = config::load();
     let config_path = config::path();
     let shared_config = Arc::new(RwLock::new(config.clone()));
@@ -315,8 +315,11 @@ fn handle_agent(app: &mut App, request: UiRequest) -> Task<Message> {
             let responder = app
                 .responses
                 .lock()
-                .expect("responder slot poisoned")
-                .take();
+                .ok()
+                .and_then(|mut responders| responders.remove(&info.cookie));
+            let Some(responder) = responder else {
+                return Task::none();
+            };
 
             if let Some(dialog) = app
                 .dialog
@@ -329,7 +332,7 @@ fn handle_agent(app: &mut App, request: UiRequest) -> Task<Message> {
                 dialog.notice = notice;
                 dialog.notice_is_error = notice_is_error;
                 dialog.busy = false;
-                dialog.responder = responder;
+                dialog.responder = Some(responder);
             } else {
                 cancel_dialog(app);
 
@@ -341,7 +344,7 @@ fn handle_agent(app: &mut App, request: UiRequest) -> Task<Message> {
                     notice,
                     notice_is_error,
                     busy: false,
-                    responder,
+                    responder: Some(responder),
                 });
             }
 
@@ -475,7 +478,8 @@ fn reload_config(app: &mut App) -> Task<Message> {
         return Task::none();
     };
 
-    let window_changed = app.config.window != config.window;
+    let previous_window = app.config.window.clone();
+    let window_changed = previous_window != config.window;
     app.config = config.clone();
 
     if let Ok(mut shared) = app.shared_config.write() {
@@ -485,21 +489,62 @@ fn reload_config(app: &mut App) -> Task<Message> {
     app.theme = config.appearance.theme();
 
     if window_changed {
-        apply_window_config(app)
+        apply_window_config(app, &previous_window)
     } else {
         Task::none()
     }
 }
 
-fn apply_window_config(app: &App) -> Task<Message> {
+fn apply_window_config(app: &mut App, previous: &config::WindowConfig) -> Task<Message> {
     let Some(id) = app.window else {
         return Task::none();
     };
 
-    let mut tasks = vec![window::resize(id, app.config.window.size())];
+    let current = &app.config.window;
+    let requires_reopen = previous.placement != current.placement
+        || previous.closeable != current.closeable
+        || previous.minimizable != current.minimizable;
 
-    if let window::Position::Specific(position) = app.config.window.position() {
-        tasks.push(window::move_to(id, position));
+    if requires_reopen {
+        let (new_id, open) = window::open(current.settings());
+        app.window = Some(new_id);
+
+        return window::close::<Message>(id)
+            .chain(open.map(Message::WindowOpened))
+            .chain(focus_window(app, new_id));
+    }
+
+    let mut tasks = Vec::new();
+
+    if previous.size() != current.size() {
+        tasks.push(window::resize(id, current.size()));
+    }
+
+    if previous.resizable != current.resizable {
+        tasks.push(window::set_resizable(id, current.resizable));
+    }
+
+    if previous.decorations != current.decorations {
+        tasks.push(window::toggle_decorations(id));
+    }
+
+    if previous.always_on_top != current.always_on_top {
+        tasks.push(window::set_level(
+            id,
+            if current.always_on_top {
+                window::Level::AlwaysOnTop
+            } else {
+                window::Level::Normal
+            },
+        ));
+    }
+
+    if (previous.x != current.x || previous.y != current.y)
+        && current.placement == config::Placement::Fixed
+    {
+        if let window::Position::Specific(position) = current.position() {
+            tasks.push(window::move_to(id, position));
+        }
     }
 
     Task::batch(tasks)

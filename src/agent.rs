@@ -30,7 +30,7 @@ pub enum UiResponse {
     Cancel,
 }
 
-pub type ResponderSlot = Arc<Mutex<Option<oneshot::Sender<UiResponse>>>>;
+pub type ResponderMap = Arc<Mutex<HashMap<String, oneshot::Sender<UiResponse>>>>;
 
 #[derive(Debug, Clone)]
 pub enum UiRequest {
@@ -59,7 +59,7 @@ pub enum UiRequest {
 #[derive(Clone)]
 struct Shared {
     ui: mpsc::UnboundedSender<UiRequest>,
-    responses: ResponderSlot,
+    responses: ResponderMap,
     cancellations: Arc<Mutex<HashMap<String, oneshot::Sender<()>>>>,
     config: Arc<RwLock<Config>>,
 }
@@ -71,7 +71,7 @@ pub struct Agent {
 impl Agent {
     fn new(
         ui: mpsc::UnboundedSender<UiRequest>,
-        responses: ResponderSlot,
+        responses: ResponderMap,
         config: Arc<RwLock<Config>>,
     ) -> Self {
         Self {
@@ -87,7 +87,7 @@ impl Agent {
 
 pub fn spawn(
     ui: mpsc::UnboundedSender<UiRequest>,
-    responses: ResponderSlot,
+    responses: ResponderMap,
     config: Arc<RwLock<Config>>,
 ) {
     let result = std::thread::Builder::new()
@@ -234,7 +234,7 @@ async fn run_session(
     session: &mut PolkitAgentSession,
     info: AuthInfo,
     ui: mpsc::UnboundedSender<UiRequest>,
-    responses: ResponderSlot,
+    responses: ResponderMap,
     max_attempts: usize,
     text: Text,
     cancel: &mut oneshot::Receiver<()>,
@@ -259,7 +259,18 @@ async fn run_session(
 
                     return Err(PolkitError::Cancelled);
                 }
-                message = session.async_dispatch() => message.map_err(PolkitError::from)?,
+                message = session.async_dispatch() => match message {
+                    Ok(message) => message,
+                    Err(error) => {
+                        send_close(
+                            &ui,
+                            &info.cookie,
+                            false,
+                            Some(error.to_string()),
+                        );
+                        return Err(PolkitError::from(error));
+                    }
+                },
             };
 
             match message {
@@ -322,7 +333,10 @@ async fn run_session(
         };
 
         let (responder, response) = oneshot::channel();
-        *responses.lock().expect("responder slot poisoned") = Some(responder);
+        responses
+            .lock()
+            .expect("responder map poisoned")
+            .insert(info.cookie.clone(), responder);
 
         let (notice_text, notice_is_error) = match notice.take() {
             Some((text, is_error)) => (Some(text), is_error),
@@ -339,6 +353,10 @@ async fn run_session(
             })
             .is_err()
         {
+            responses
+                .lock()
+                .expect("responder map poisoned")
+                .remove(&info.cookie);
             return Err(PolkitError::Cancelled);
         }
 
@@ -346,6 +364,10 @@ async fn run_session(
             biased;
 
             _ = &mut *cancel => {
+                responses
+                    .lock()
+                    .expect("responder map poisoned")
+                    .remove(&info.cookie);
                 send_close(
                     &ui,
                     &info.cookie,
@@ -360,11 +382,12 @@ async fn run_session(
 
         match response {
             Ok(UiResponse::Password(password)) => {
-                session
-                    .response(Response {
-                        password: &password,
-                    })
-                    .map_err(PolkitError::from)?;
+                if let Err(error) = session.response(Response {
+                    password: &password,
+                }) {
+                    send_close(&ui, &info.cookie, false, Some(error.to_string()));
+                    return Err(PolkitError::from(error));
+                }
             }
             _ => {
                 send_close(&ui, &info.cookie, false, Some(text.cancelled.clone()));
