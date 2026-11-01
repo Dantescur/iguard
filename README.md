@@ -6,7 +6,7 @@ The iguard source code is licensed under the MIT License; see [LICENSE](LICENSE)
 
 ## Status
 
-iguard is an early-stage project. It registers itself with Polkit when started inside a graphical user session. Prebuilt release archives are available for glibc x86_64 and aarch64; Fedora packaging is also in progress. Do not run iguard alongside another Polkit authentication agent.
+iguard is an early-stage project. It registers itself with Polkit when started inside a graphical user session. The release workflow builds glibc x86_64 and aarch64 archives when a version tag is pushed; downloads are available after that workflow publishes the release. Fedora packaging is also in progress. Do not run iguard alongside another Polkit authentication agent.
 
 ## Requirements
 
@@ -32,9 +32,16 @@ curl -fsSL https://dantescur.github.io/iguard/install.sh | sudo bash -s -- --sys
 
 Run the installer with `--uninstall` to remove the binary and autostart entry for the current scope; configuration files are left untouched. The installer verifies the release archive against the SHA-256 checksum published with the release. Checksums detect corrupt downloads, not a compromised release.
 
-Prebuilt binaries are provided for x86_64 and aarch64 glibc systems. musl systems must build from source.
+Release binaries target x86_64 and aarch64 glibc systems. musl systems must build from source. The release workflow builds on Ubuntu 22.04 to target glibc 2.35 or newer.
 
-Maintainers can generate the release archive and checksum with `just release-assets` and attach both files to the matching GitHub release.
+To publish a release, update `version` in `Cargo.toml`, push the matching version tag, and let GitHub Actions build and publish the binaries and checksums:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The tag must match the Cargo version. The workflow publishes archives named for the tag and target, plus `SHA256SUMS`, which the installer downloads from GitHub Releases. The documentation site and installer script are deployed separately by the Pages workflow when changes are pushed to `main`.
 
 ## Build and run
 

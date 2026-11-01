@@ -18,7 +18,7 @@ For a system-wide install:
 curl -fsSL https://dantescur.github.io/iguard/install.sh | sudo bash -s -- --system
 ```
 
-Prebuilt archives are available for x86_64 and aarch64 glibc systems. On musl, build from source.
+Release archives target x86_64 and aarch64 glibc systems, built on Ubuntu 22.04 for glibc 2.35 or newer. On musl, build from source. Archives become available after the release workflow completes for a version tag.
 
 ::: tip Checksum verification
 The installer verifies the archive against the `SHA256SUMS` published with the release. That catches corrupt downloads, not a compromised release. If you want to audit the script first, download it and read it before running it.
