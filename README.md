@@ -2,19 +2,39 @@
 
 `iguard` is a graphical [Polkit](https://github.com/polkit-org/polkit) authentication agent for Linux desktop sessions. It displays an authentication prompt when an application requests authorization and returns the response to Polkit.
 
-iguard is licensed under the MIT License; see [LICENSE](LICENSE).
+The iguard source code is licensed under the MIT License; see [LICENSE](LICENSE). The release binary links [`zbus-polkit-agent`](https://crates.io/crates/zbus-polkit-agent), which is licensed under GPL-3.0-or-later, so binary distributions are GPL-3.0-or-later.
 
 ## Status
 
-iguard is an early-stage project. It currently builds from source and registers itself with Polkit when started inside a graphical user session. It does not yet include distro packages, a desktop autostart entry, or an installer. Run it manually while evaluating it; do not run it alongside another Polkit authentication agent.
+iguard is an early-stage project. It registers itself with Polkit when started inside a graphical user session. Prebuilt release archives are available for glibc x86_64 and aarch64; Fedora packaging is also in progress. Do not run iguard alongside another Polkit authentication agent.
 
 ## Requirements
 
 - Linux with Polkit and a working system D-Bus
 - An active graphical desktop session with a session D-Bus
-- Rust and Cargo (edition 2024)
+- Rust and Cargo (edition 2024) when building from source
 - [`just`](https://github.com/casey/just) is optional and provides shortcuts for common development commands
 - The native libraries required by Iced on your distribution; these depend on whether your desktop uses Wayland, X11, or both
+
+## Install
+
+The installer downloads a prebuilt release archive from GitHub Releases and installs it for the current user:
+
+```sh
+curl -fsSL https://dantescur.github.io/iguard/install.sh | bash
+```
+
+It installs the binary to `~/.local/bin/iguard` and an autostart entry to `~/.config/autostart/iguard.desktop`. To install system-wide instead:
+
+```sh
+curl -fsSL https://dantescur.github.io/iguard/install.sh | sudo bash -s -- --system
+```
+
+Run the installer with `--uninstall` to remove the binary and autostart entry for the current scope; configuration files are left untouched. The installer verifies the release archive against the SHA-256 checksum published with the release. Checksums detect corrupt downloads, not a compromised release.
+
+Prebuilt binaries are provided for x86_64 and aarch64 glibc systems. musl systems must build from source.
+
+Maintainers can generate the release archive and checksum with `just release-assets` and attach both files to the matching GitHub release.
 
 ## Build and run
 
@@ -47,9 +67,9 @@ The generated configuration includes defaults and comments with accepted theme, 
 
 ## Distribution
 
-Fedora is the first planned distribution target. The initial package will be an RPM that installs the executable and a desktop autostart entry, with package metadata declaring the runtime requirements. A distro package is a better initial fit than a sandboxed bundle because the agent needs to register with Polkit over the system bus from the user's active session. AppImage can be evaluated later, but it does not by itself solve autostart or system integration.
+Fedora is the first distribution target. The RPM installs the executable and a desktop autostart entry, with runtime shared-library requirements detected from the binary. A distro package fits the agent's need to register with Polkit over the system bus from the user's active session. AppImage can be evaluated later, but it does not by itself solve autostart or system integration.
 
-RPM packaging is not implemented yet. Before publishing packages, the project needs a stable repository URL, a desktop entry, documented Fedora build dependencies, and a real-session installation test. Packaging must not install a Polkit policy that grants privileges; iguard is the authentication UI, while authorization policy remains the responsibility of the system and the requesting applications.
+The Fedora RPM spec and desktop autostart entry are in `packaging/fedora/`. On Fedora with RPM and Cargo packaging tools installed, `just fedora-rpm` builds binary and source RPMs from the current checkout. The result is written under `target/rpm/`. The package has been built and its tests passed on Fedora 44; a clean COPR build and real-session install test are still needed. Packaging must not install a Polkit policy that grants privileges; iguard is the authentication UI, while authorization policy remains the responsibility of the system and the requesting applications.
 
 ## Development
 
