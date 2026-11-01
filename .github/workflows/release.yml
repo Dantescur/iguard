@@ -50,6 +50,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes \
+            libsystemd-dev \
             libudev-dev \
             libwayland-dev \
             libx11-dev \
