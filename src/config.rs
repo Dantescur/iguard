@@ -544,4 +544,75 @@ mod tests {
 
         assert_eq!(appearance.theme(), Theme::Dark);
     }
+
+    #[test]
+    fn partial_config_uses_current_defaults() {
+        let config: Config = toml::from_str(
+            r#"
+            [behavior]
+            show_action_id = true
+
+            [typography]
+            font = "monospace"
+            "#,
+        )
+        .expect("partial configuration should use defaults for missing fields");
+
+        assert_eq!(config.window, WindowConfig::default());
+        assert_eq!(config.behavior.max_attempts(), 3);
+        assert!(config.behavior.show_action_id);
+        assert!(!config.behavior.show_details);
+        assert_eq!(config.text.title, Text::default().title);
+        assert_eq!(config.text.identity, Text::default().identity);
+        assert!(matches!(config.typography.font, FontFamily::Monospace));
+        assert_eq!(
+            config.typography.title_size,
+            Typography::default().title_size
+        );
+    }
+
+    #[test]
+    fn window_size_and_attempts_are_bounded() {
+        let window = WindowConfig {
+            width: 100.0,
+            height: 5000.0,
+            ..WindowConfig::default()
+        };
+        assert_eq!(window.size(), Size::new(320.0, 4096.0));
+
+        assert_eq!(
+            Behavior {
+                max_attempts: 0,
+                ..Behavior::default()
+            }
+            .max_attempts(),
+            1
+        );
+        assert_eq!(
+            Behavior {
+                max_attempts: 99,
+                ..Behavior::default()
+            }
+            .max_attempts(),
+            10
+        );
+    }
+
+    #[test]
+    fn custom_theme_overrides_only_selected_palette_slots() {
+        let base = Theme::Nord.palette();
+        let appearance = Appearance {
+            theme: "nord".to_owned(),
+            primary: Some("#123456".to_owned()),
+            ..Appearance::default()
+        };
+        let customized = appearance.theme().palette();
+
+        assert_eq!(customized.primary, Color::from_rgba8(0x12, 0x34, 0x56, 1.0));
+        assert_eq!(customized.background, base.background);
+        assert_eq!(customized.text, base.text);
+        assert_eq!(customized.success, base.success);
+        assert_eq!(customized.warning, base.warning);
+        assert_eq!(customized.danger, base.danger);
+    }
 }
