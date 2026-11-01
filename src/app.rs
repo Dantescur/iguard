@@ -5,7 +5,7 @@ use std::{
 };
 
 use iced::{
-    Element, Length, Subscription, Task,
+    Background, Border, Color, Element, Length, Shadow, Subscription, Task,
     keyboard::{self, Key, key::Named},
     time,
     widget::{Id, button, column, container, operation, row, text, text_input},
@@ -52,6 +52,7 @@ struct Dialog {
     notice: Option<String>,
     notice_is_error: bool,
     busy: bool,
+    attempt: usize,
     responder: Option<oneshot::Sender<UiResponse>>,
 }
 
@@ -170,13 +171,17 @@ pub fn view(app: &App, id: window::Id) -> Element<'_, Message> {
     let config = &app.config;
     let typography = &config.typography;
     let font = typography.font();
-    let danger = app.theme.palette().danger;
+    let palette = app.theme.palette();
+    let ink = Color::from_rgb(0.90, 0.93, 0.97);
+    let muted = Color::from_rgb(0.58, 0.65, 0.74);
+    let surface = Color::from_rgb(0.075, 0.095, 0.13);
+    let inset = Color::from_rgb(0.045, 0.06, 0.085);
 
     let status: Element<'_, Message> = match (&dialog.notice, dialog.busy) {
         (Some(notice), _) if dialog.notice_is_error => text(notice)
             .size(typography.small_size)
             .font(font)
-            .color(danger)
+            .color(palette.danger)
             .into(),
         (Some(notice), _) => text(notice).size(typography.small_size).font(font).into(),
         (None, true) => text(&config.text.authenticating)
@@ -193,8 +198,33 @@ pub fn view(app: &App, id: window::Id) -> Element<'_, Message> {
             .size(typography.body_size)
             .font(font),
     )
-    .style(button::primary)
-    .padding([typography.button_padding_y, typography.button_padding_x])
+    .style(move |_, status| button::Style {
+        background: Some(Background::Color(if can_submit {
+            palette.primary
+        } else {
+            Color::from_rgb(0.22, 0.28, 0.36)
+        })),
+        text_color: if can_submit { Color::WHITE } else { muted },
+        border: Border {
+            radius: 9.0.into(),
+            ..Border::default()
+        },
+        ..match status {
+            button::Status::Hovered => button::Style {
+                shadow: Shadow {
+                    color: palette.primary.scale_alpha(0.22),
+                    blur_radius: 12.0,
+                    ..Shadow::default()
+                },
+                ..button::Style::default()
+            },
+            _ => button::Style::default(),
+        }
+    })
+    .padding([
+        typography.button_padding_y + 2.0,
+        typography.button_padding_x,
+    ])
     .width(Length::Fill)
     .on_press_maybe(can_submit.then_some(Message::Submit));
 
@@ -203,31 +233,84 @@ pub fn view(app: &App, id: window::Id) -> Element<'_, Message> {
             .size(typography.body_size)
             .font(font),
     )
-    .padding([typography.button_padding_y, typography.button_padding_x])
+    .style(move |_, status| button::Style {
+        background: Some(Background::Color(
+            if matches!(status, button::Status::Hovered) {
+                Color::from_rgb(0.16, 0.19, 0.25)
+            } else {
+                surface
+            },
+        )),
+        text_color: ink,
+        border: Border {
+            radius: 9.0.into(),
+            color: Color::from_rgb(0.20, 0.25, 0.32),
+            width: 1.0,
+        },
+        ..button::Style::default()
+    })
+    .padding([
+        typography.button_padding_y + 2.0,
+        typography.button_padding_x,
+    ])
     .width(Length::Fill)
     .on_press(Message::Cancel);
 
+    let header = container(
+        row![
+            text("▣").size(14).color(palette.primary),
+            text("org.freedesktop.PolicyKit1")
+                .size(10)
+                .font(typography.font())
+                .color(muted),
+            iced::widget::Space::new().width(Length::Fill),
+            text("●").size(8).color(palette.success),
+        ]
+        .spacing(9)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([13, 18])
+    .width(Length::Fill)
+    .style(move |_| container::Style {
+        background: Some(Background::Color(inset)),
+        ..container::Style::default()
+    });
+
     let mut content = column![
+        text("AUTHORIZATION REQUEST")
+            .size(10)
+            .font(typography.font())
+            .color(palette.primary),
         text(&config.text.title)
-            .size(typography.title_size)
-            .font(font),
+            .size(typography.title_size + 4.0)
+            .font(font)
+            .color(ink),
         text(&dialog.info.message)
             .size(typography.body_size)
-            .font(font),
-        text(format!(
-            "{}: {}",
-            config.text.identity, dialog.info.user_name
-        ))
-        .size(typography.small_size)
-        .font(font),
+            .font(font)
+            .color(muted),
     ]
-    .spacing(typography.spacing);
+    .spacing(8);
 
     if config.behavior.show_action_id && !dialog.info.action_id.is_empty() {
         content = content.push(
-            text(format!("{}: {}", config.text.action, dialog.info.action_id))
-                .size(typography.small_size)
-                .font(font),
+            container(
+                text(&dialog.info.action_id)
+                    .size(typography.small_size)
+                    .font(typography.font())
+                    .color(muted),
+            )
+            .padding([7, 9])
+            .width(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(Background::Color(inset)),
+                border: Border {
+                    radius: 5.0.into(),
+                    color: Color::from_rgb(0.16, 0.21, 0.28),
+                    width: 1.0,
+                },
+                ..container::Style::default()
+            }),
         );
     }
 
@@ -235,20 +318,27 @@ pub fn view(app: &App, id: window::Id) -> Element<'_, Message> {
         content = content.push(
             text(&config.text.details)
                 .size(typography.small_size)
-                .font(font),
+                .font(font)
+                .color(muted),
         );
 
         for (key, value) in &dialog.info.details {
             content = content.push(
                 text(format!("{key}: {value}"))
                     .size(typography.small_size)
-                    .font(font),
+                    .font(font)
+                    .color(muted),
             );
         }
     }
 
     if let Some(prompt) = &dialog.prompt {
-        content = content.push(text(prompt).size(typography.body_size).font(font));
+        content = content.push(
+            text(prompt)
+                .size(typography.small_size)
+                .font(font)
+                .color(muted),
+        );
 
         let mut password = text_input(&config.text.password, &dialog.password)
             .id(password_id())
@@ -257,6 +347,23 @@ pub fn view(app: &App, id: window::Id) -> Element<'_, Message> {
             .font(font)
             .secure(!dialog.echo_on)
             .width(Length::Fill);
+
+        password = password.style(move |_, status| text_input::Style {
+            background: Background::Color(inset),
+            border: Border {
+                radius: 9.0.into(),
+                color: if matches!(status, text_input::Status::Focused { .. }) {
+                    palette.primary
+                } else {
+                    Color::from_rgb(0.20, 0.25, 0.32)
+                },
+                width: 1.0,
+            },
+            icon: muted,
+            placeholder: muted,
+            value: ink,
+            selection: palette.primary,
+        });
 
         if !dialog.busy {
             password = password
@@ -273,16 +380,72 @@ pub fn view(app: &App, id: window::Id) -> Element<'_, Message> {
         );
     }
 
-    content = content
-        .push(status)
-        .push(row![cancel, authenticate].spacing(typography.spacing));
+    let actions = row![
+        iced::widget::Space::new().width(Length::Fill),
+        cancel.width(Length::Shrink),
+        authenticate.width(Length::Shrink)
+    ]
+    .spacing(8);
+    content = content.push(status).push(actions);
 
-    container(content)
+    let footer = container(
+        row![
+            text("●").size(8).color(palette.success),
+            text(format!("identity: {}", dialog.info.user_name))
+                .size(9)
+                .font(typography.font())
+                .color(muted),
+            iced::widget::Space::new().width(Length::Fill),
+            text(format!(
+                "attempt {} of {}",
+                dialog.attempt,
+                config.behavior.max_attempts()
+            ))
+            .size(9)
+            .font(typography.font())
+            .color(muted),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([10, 16])
+    .width(Length::Fill)
+    .style(move |_| container::Style {
+        background: Some(Background::Color(inset)),
+        ..container::Style::default()
+    });
+
+    let card = container(column![
+        header,
+        container(content).padding([22, 22]),
+        footer
+    ])
+    .width(Length::Fill)
+    .style(move |_| container::Style {
+        background: Some(Background::Color(surface)),
+        border: Border {
+            radius: 14.0.into(),
+            color: Color::from_rgb(0.17, 0.23, 0.31),
+            width: 1.0,
+        },
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.38),
+            blur_radius: 28.0,
+            ..Shadow::default()
+        },
+        ..container::Style::default()
+    });
+
+    container(card)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(typography.padding)
         .center_x(Length::Fill)
         .center_y(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.025, 0.035, 0.052))),
+            ..container::Style::default()
+        })
         .into()
 }
 
@@ -300,6 +463,7 @@ fn handle_agent(app: &mut App, request: UiRequest) -> Task<Message> {
                 notice: None,
                 notice_is_error: false,
                 busy: false,
+                attempt: 1,
                 responder: None,
             });
 
@@ -330,6 +494,9 @@ fn handle_agent(app: &mut App, request: UiRequest) -> Task<Message> {
                 dialog.echo_on = echo_on;
                 dialog.password.clear();
                 dialog.notice = notice;
+                if notice_is_error {
+                    dialog.attempt = dialog.attempt.saturating_add(1);
+                }
                 dialog.notice_is_error = notice_is_error;
                 dialog.busy = false;
                 dialog.responder = Some(responder);
@@ -344,6 +511,7 @@ fn handle_agent(app: &mut App, request: UiRequest) -> Task<Message> {
                     notice,
                     notice_is_error,
                     busy: false,
+                    attempt: 1,
                     responder: Some(responder),
                 });
             }
